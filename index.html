@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dziennik Wagi</title>
-  <!-- Chart.js + Wtyczka do linii (adnotacji) -->
+  <!-- Chart.js + Plugin do adnotacji (linie celów) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
   <style>
@@ -86,13 +86,29 @@
     const TAB_NAME = 'arkusz';
     const API_URL = `https://opensheet.elk.sh/${SHEET_ID}/${encodeURIComponent(TAB_NAME)}`;
 
-    const KOLORY = ['#2563eb', '#dc2626', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#db2777'];
+    const KOLORY = [
+      { main: '#2563eb', light: 'rgba(37, 99, 235, 0.25)' },   // Niebieski
+      { main: '#dc2626', light: 'rgba(220, 38, 38, 0.25)' },   // Czerwony
+      { main: '#16a34a', light: 'rgba(22, 163, 74, 0.25)' },   // Zielony
+      { main: '#9333ea', light: 'rgba(147, 51, 234, 0.25)' },  // Fioletowy
+      { main: '#ea580c', light: 'rgba(234, 88, 12, 0.25)' }    // Pomarańczowy
+    ];
 
     function znajdzWartosc(row, mozliweKlucze) {
       for (const k of mozliweKlucze) {
         if (row[k] !== undefined && row[k] !== '') return row[k];
       }
       return null;
+    }
+
+    // Funkcja licząca medianę z tablicy liczb
+    function obliczMediane(arr) {
+      if (!arr || arr.length === 0) return null;
+      const sorted = [...arr].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 !== 0 
+        ? sorted[mid] 
+        : (sorted[mid - 1] + sorted[mid]) / 2;
     }
 
     async function wczytajDane() {
@@ -131,10 +147,9 @@
             daneUzytkownikow[email] = {};
           }
 
-          // Zapamiętujemy OSTATNI wpis z danego dnia
+          // Zapamiętujemy ostatni wpis z danego dnia
           daneUzytkownikow[email][dataDzienna] = wagaVal;
 
-          // Jeśli w wierszu podano cel, zapisujemy go
           if (!isNaN(celVal)) {
             celeWagi[email] = celVal;
           }
@@ -143,54 +158,80 @@
         const unikalneDaty = Array.from(datySet);
         const annotations = {};
         let kolorIdx = 0;
+        const datasets = [];
 
-        const datasets = Object.keys(daneUzytkownikow).map(email => {
-          const color = KOLORY[kolorIdx % KOLORY.length];
+        Object.keys(daneUzytkownikow).forEach(email => {
+          const palette = KOLORY[kolorIdx % KOLORY.length];
           kolorIdx++;
 
-          // Dodajemy poziomą linię docelowej wagi w kolorze danego użytkownika
+          // 1. Linia docelowej wagi (jeśli ustawiona)
           if (celeWagi[email]) {
             annotations[`cel_${email}`] = {
               type: 'line',
               yMin: celeWagi[email],
               yMax: celeWagi[email],
-              borderColor: color,
+              borderColor: palette.main,
               borderWidth: 2,
               borderDash: [6, 6],
               label: {
                 display: true,
-                content: `Cel: ${celeWagi[email]} kg`,
+                content: `Cel (${email}): ${celeWagi[email]} kg`,
                 position: 'end',
-                backgroundColor: color,
+                backgroundColor: palette.main,
                 color: '#fff',
                 font: { size: 10 }
               }
             };
           }
 
-          const serieWag = unikalneDaty.map(data => daneUzytkownikow[email][data] ?? null);
+          // 2. Tablica codziennych wag (z zachowaniem pustych dni jako null)
+          const rawWagiSeries = unikalneDaty.map(data => daneUzytkownikow[email][data] ?? null);
 
-          return {
-            label: email,
-            data: serieWag,
-            borderColor: color,
-            backgroundColor: color,
-            borderWidth: 3,
-            tension: 0.25,
+          // 3. Obliczanie 7-dniowej mediany kroczącej
+          const medianySeries = rawWagiSeries.map((_, idx) => {
+            // Zbieramy do 7 ostatnich istniejących pomiarów
+            const wagiWOkresie = [];
+            for (let i = idx; i >= 0 && wagiWOkresie.length < 7; i--) {
+              if (rawWagiSeries[i] !== null) {
+                wagiWOkresie.push(rawWagiSeries[i]);
+              }
+            }
+            return obliczMediane(wagiWOkresie);
+          });
+
+          // Seria A: Surowe codzienne pomiary (delikatne, jasne)
+          datasets.push({
+            label: `${email} (pomiary)`,
+            data: rawWagiSeries,
+            borderColor: palette.light,
+            backgroundColor: palette.light,
+            borderWidth: 1.5,
+            tension: 0.1,
+            spanGaps: true,
+            pointRadius: 3,
+            pointHoverRadius: 5
+          });
+
+          // Seria B: Mediana 7-dniowa (wyrazista, gruba)
+          datasets.push({
+            label: `${email} (Mediana 7d)`,
+            data: medianySeries,
+            borderColor: palette.main,
+            backgroundColor: palette.main,
+            borderWidth: 4,
+            tension: 0.3,
             spanGaps: true,
             pointRadius: 5,
-            pointHoverRadius: 7
-          };
+            pointHoverRadius: 8
+          });
         });
 
-        // Ukrywamy komunikat ładowania DOPIERO po przetworzeniu danych
         statusEl.style.display = 'none';
-
         rysujWykres(unikalneDaty, datasets, annotations);
 
       } catch (err) {
         console.error('Błąd:', err);
-        statusEl.innerText = 'Wystąpił błąd podczas ładowania danych. Sprawdź konsolę przeglądarki (F12).';
+        statusEl.innerText = 'Wystąpił błąd podczas ładowania danych.';
       }
     }
 
