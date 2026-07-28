@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dziennik Wagi</title>
+  <!-- Biblioteka Chart.js do rysowania wykresu -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 0 20px;
+      background-color: #f4f6f8;
+      color: #333;
+    }
+    .container {
+      background: #ffffff;
+      padding: 24px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+    h1 { margin-top: 0; text-align: center; }
+    .chart-box { margin-top: 20px; position: relative; }
+    #status { text-align: center; font-style: italic; color: #666; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>📈 Statystyki Wagi</h1>
+    <div id="status">Ładowanie danych z Arkusza Google...</div>
+    
+    <div class="chart-box">
+      <canvas id="wykresWagi"></canvas>
+    </div>
+  </div>
+
+  <script>
+    // Twój dedykowany URL API utworzony z Twojego ID Arkusza:
+    const SHEET_ID = '1MKqHQpjq6Z4b-9x9ubSUJkVgWinQA-w8VhMtkMVHahs';
+    const TAB_NAME = 'arkusz'; // Zmień, jeśli nazwa zakładki na dole jest inna
+    
+    const API_URL = `https://opensheet.elk.sh/${SHEET_ID}/${encodeURIComponent(TAB_NAME)}`;
+
+    async function pobierzIDrawuj() {
+      const statusEl = document.getElementById('status');
+      
+      try {
+        const response = await fetch(API_URL);
+        if (!response.ok) throw new Error('Błąd połączenia z API arkusza.');
+        
+        const data = await response.json();
+
+        if (data.length === 0) {
+          statusEl.innerText = 'Brak wpisów w arkuszu. Wypełnij formularz chociaż raz!';
+          return;
+        }
+
+        statusEl.style.display = 'none';
+
+        // 1. Odczyt kolumn - dopasuj nazwy w nawiasach kwadratowych do nagłówków w 1. wierszu Twojego arkusza
+        const etykiety = data.map(row => {
+          const rawDate = row['Sygnatura czasowa'] || row['Timestamp'] || '';
+          return rawDate.split(' ')[0]; // Pobiera samą datę (np. "2026-07-28")
+        });
+
+        const wagi = data.map(row => {
+          const val = row['Waga w kg'] || row['Waga'] || Object.values(row)[2]; 
+          return parseFloat(String(val).replace(',', '.'));
+        });
+
+        const imiona = data.map(row => row['Imię / Nick'] || row['Nick'] || Object.values(row)[1]);
+
+        // 2. Rysowanie Wykresu
+        renderujWykres(etykiety, wagi, imiona);
+
+      } catch (err) {
+        console.error(err);
+        statusEl.innerText = 'Nie udało się pobrać danych. Upewnij się, że arkusz jest udostępniony publicznie jako "Każda osoba mająca link"!';
+      }
+    }
+
+    function renderujWykres(etykiety, wagi, imiona) {
+      const ctx = document.getElementById('wykresWagi').getContext('2d');
+      
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: etykiety,
+          datasets: [{
+            label: 'Waga (kg)',
+            data: wagi,
+            borderColor: '#2563eb',
+            backgroundColor: 'rgba(37, 99, 235, 0.1)',
+            borderWidth: 3,
+            fill: true,
+            tension: 0.3,
+            pointBackgroundColor: '#2563eb',
+            pointRadius: 5
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            tooltip: {
+              callbacks: {
+                afterLabel: function(context) {
+                  return 'Osoba: ' + imiona[context.dataIndex];
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              title: { display: true, text: 'Waga (kg)' },
+              beginAtZero: false
+            },
+            x: {
+              title: { display: true, text: 'Data' }
+            }
+          }
+        }
+      });
+    }
+
+    pobierzIDrawuj();
+  </script>
+</body>
+</html>
