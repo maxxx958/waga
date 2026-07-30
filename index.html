@@ -4,49 +4,64 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Dziennik Wagi</title>
-  <!-- Chart.js + Plugin do adnotacji (linie celów) -->
+  <!-- Chart.js + Plugin do adnotacji -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
   <style>
+    * {
+      box-sizing: border-box;
+    }
     body {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      max-width: 850px;
-      margin: 30px auto;
-      padding: 0 20px;
+      max-width: 900px;
+      margin: 20px auto;
+      padding: 0 12px;
       background-color: #f8fafc;
       color: #0f172a;
     }
     .card {
       background: #ffffff;
-      padding: 28px;
+      padding: 20px;
       border-radius: 16px;
       box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
       border: 1px solid #e2e8f0;
+    }
+    @media (min-width: 640px) {
+      body { margin: 30px auto; padding: 0 20px; }
+      .card { padding: 28px; }
     }
     .header-box {
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 16px;
-      margin-bottom: 24px;
+      gap: 12px;
+      margin-bottom: 20px;
     }
     h1 {
       margin: 0;
-      font-size: 1.75rem;
+      font-size: 1.4rem;
+    }
+    @media (min-width: 640px) {
+      h1 { font-size: 1.75rem; }
     }
     .btn-add {
       display: inline-flex;
       align-items: center;
+      justify-content: center;
       gap: 8px;
       background-color: #2563eb;
       color: #ffffff;
-      padding: 10px 18px;
+      padding: 10px 16px;
       border-radius: 8px;
       text-decoration: none;
       font-weight: 600;
-      font-size: 0.95rem;
+      font-size: 0.9rem;
+      width: 100%;
       transition: background-color 0.2s ease;
+    }
+    @media (min-width: 480px) {
+      .btn-add { width: auto; }
     }
     .btn-add:hover {
       background-color: #1d4ed8;
@@ -61,6 +76,59 @@
       position: relative;
       margin-top: 10px;
       width: 100%;
+      height: 320px;
+    }
+    @media (min-width: 640px) {
+      .chart-container { height: 400px; }
+    }
+
+    /* KARTY POSTĘPU DO CELU */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      margin-top: 24px;
+    }
+    @media (min-width: 640px) {
+      .summary-grid {
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      }
+    }
+    .user-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px;
+      border-left: 5px solid #2563eb;
+    }
+    .user-card-header {
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: #334155;
+      margin-bottom: 8px;
+      word-break: break-all;
+    }
+    .metrics-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      color: #64748b;
+      margin-bottom: 6px;
+    }
+    .metrics-row strong {
+      color: #0f172a;
+    }
+    .progress-bar-bg {
+      background: #e2e8f0;
+      height: 10px;
+      border-radius: 5px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 5px;
+      transition: width 0.4s ease;
     }
   </style>
 </head>
@@ -79,6 +147,8 @@
     <div class="chart-container">
       <canvas id="wykresWagi"></canvas>
     </div>
+
+    <div id="summaryGrid" class="summary-grid"></div>
   </div>
 
   <script>
@@ -101,7 +171,6 @@
       return null;
     }
 
-    // Funkcja licząca medianę z tablicy liczb
     function obliczMediane(arr) {
       if (!arr || arr.length === 0) return null;
       const sorted = [...arr].sort((a, b) => a - b);
@@ -128,6 +197,7 @@
         const datySet = new Set();
         const daneUzytkownikow = {};
         const celeWagi = {};
+        const poczatkoweWagi = {};
 
         rawData.forEach(row => {
           const ts = znajdzWartosc(row, ['Sygnatura czasowa']) || '';
@@ -145,9 +215,9 @@
 
           if (!daneUzytkownikow[email]) {
             daneUzytkownikow[email] = {};
+            poczatkoweWagi[email] = wagaVal; // Pierwsza zanotowana waga
           }
 
-          // Zapamiętujemy ostatni wpis z danego dnia
           daneUzytkownikow[email][dataDzienna] = wagaVal;
 
           if (!isNaN(celVal)) {
@@ -159,12 +229,13 @@
         const annotations = {};
         let kolorIdx = 0;
         const datasets = [];
+        const podsumowanieHtml = [];
 
         Object.keys(daneUzytkownikow).forEach(email => {
           const palette = KOLORY[kolorIdx % KOLORY.length];
           kolorIdx++;
 
-          // 1. Linia docelowej wagi (jeśli ustawiona)
+          // Linia celu na wykresie
           if (celeWagi[email]) {
             annotations[`cel_${email}`] = {
               type: 'line',
@@ -175,7 +246,7 @@
               borderDash: [6, 6],
               label: {
                 display: true,
-                content: `Cel (${email}): ${celeWagi[email]} kg`,
+                content: `Cel: ${celeWagi[email]} kg`,
                 position: 'end',
                 backgroundColor: palette.main,
                 color: '#fff',
@@ -184,12 +255,10 @@
             };
           }
 
-          // 2. Tablica codziennych wag (z zachowaniem pustych dni jako null)
           const rawWagiSeries = unikalneDaty.map(data => daneUzytkownikow[email][data] ?? null);
 
-          // 3. Obliczanie 7-dniowej mediany kroczącej
+          // Liczenie 7-dniowej mediany kroczącej do wykresu
           const medianySeries = rawWagiSeries.map((_, idx) => {
-            // Zbieramy do 7 ostatnich istniejących pomiarów
             const wagiWOkresie = [];
             for (let i = idx; i >= 0 && wagiWOkresie.length < 7; i--) {
               if (rawWagiSeries[i] !== null) {
@@ -199,7 +268,7 @@
             return obliczMediane(wagiWOkresie);
           });
 
-          // Seria A: Surowe codzienne pomiary (delikatne, jasne)
+          // Surowe wpisy (jasne)
           datasets.push({
             label: `${email} (pomiary)`,
             data: rawWagiSeries,
@@ -212,21 +281,58 @@
             pointHoverRadius: 5
           });
 
-          // Seria B: Mediana 7-dniowa (wyrazista, gruba)
+          // Mediana 7d (gruba)
           datasets.push({
             label: `${email} (Mediana 7d)`,
             data: medianySeries,
             borderColor: palette.main,
             backgroundColor: palette.main,
-            borderWidth: 4,
+            borderWidth: 3.5,
             tension: 0.3,
             spanGaps: true,
-            pointRadius: 5,
-            pointHoverRadius: 8
+            pointRadius: 4,
+            pointHoverRadius: 7
           });
+
+          // POBIERAMY FAKTYCZNĄ OSTATNIĄ WAGĘ (zamiast mediany)
+          const wagiIstniejace = rawWagiSeries.filter(w => w !== null);
+          const ostatniaFaktycznaWaga = wagiIstniejace[wagiIstniejace.length - 1];
+          const cel = celeWagi[email];
+          const start = poczatkoweWagi[email];
+
+          if (ostatniaFaktycznaWaga && cel) {
+            const doPrzejsciaRazem = Math.abs(start - cel);
+            const zrobiono = Math.abs(start - ostatniaFaktycznaWaga);
+            
+            let procent = doPrzejsciaRazem > 0 ? Math.round((zrobiono / doPrzejsciaRazem) * 100) : 100;
+            if (procent > 100) procent = 100;
+            if (procent < 0) procent = 0;
+
+            const roznicaKg = Math.abs(ostatniaFaktycznaWaga - cel).toFixed(1);
+            const kierunek = cel < ostatniaFaktycznaWaga ? 'do zrzucenia' : 'do przybrania';
+
+            podsumowanieHtml.push(`
+              <div class="user-card" style="border-left-color: ${palette.main}">
+                <div class="user-card-header">${email}</div>
+                <div class="metrics-row">
+                  <span>Ostatni pomiar: <strong>${ostatniaFaktycznaWaga.toFixed(1)} kg</strong></span>
+                  <span>Cel: <strong>${cel} kg</strong></span>
+                </div>
+                <div class="metrics-row">
+                  <span>Pozostało: <strong>${roznicaKg} kg</strong> (${kierunek})</span>
+                  <span>Osiągnięto: <strong>${procent}%</strong></span>
+                </div>
+                <div class="progress-bar-bg">
+                  <div class="progress-bar-fill" style="width: ${procent}%; background-color: ${palette.main}"></div>
+                </div>
+              </div>
+            `);
+          }
         });
 
         statusEl.style.display = 'none';
+        document.getElementById('summaryGrid').innerHTML = podsumowanieHtml.join('');
+
         rysujWykres(unikalneDaty, datasets, annotations);
 
       } catch (err) {
@@ -246,10 +352,15 @@
         },
         options: {
           responsive: true,
+          maintainAspectRatio: false,
           plugins: {
             legend: {
               position: 'top',
-              labels: { usePointStyle: true, padding: 15 }
+              labels: { 
+                usePointStyle: true, 
+                padding: 10,
+                font: { size: 11 }
+              }
             },
             annotation: {
               annotations: annotations
@@ -257,10 +368,15 @@
           },
           scales: {
             y: {
-              title: { display: true, text: 'Waga [kg]' }
+              title: { display: true, text: 'Waga [kg]' },
+              ticks: { font: { size: 11 } }
             },
             x: {
-              title: { display: true, text: 'Data wpisu' }
+              title: { display: true, text: 'Data' },
+              ticks: { 
+                font: { size: 10 },
+                maxRotation: 45
+              }
             }
           }
         }
