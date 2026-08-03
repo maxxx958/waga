@@ -118,6 +118,10 @@
     .metrics-row strong {
       color: #0f172a;
     }
+    .text-negative {
+      color: #dc2626 !important;
+      font-weight: 700;
+    }
     .progress-bar-bg {
       background: #e2e8f0;
       height: 10px;
@@ -294,25 +298,37 @@
             pointHoverRadius: 7
           });
 
-          // POBIERAMY FAKTYCZNĄ OSTATNIĄ WAGĘ (zamiast mediany)
+          // CALCULATE PROGRESS FOR SUMMARY CARD
           const wagiIstniejace = rawWagiSeries.filter(w => w !== null);
           const ostatniaFaktycznaWaga = wagiIstniejace[wagiIstniejace.length - 1];
           const cel = celeWagi[email];
           const start = poczatkoweWagi[email];
 
           if (ostatniaFaktycznaWaga && cel) {
+            const redukcja = cel < start; // czy celem jest schudnięcie
             const doPrzejsciaRazem = Math.abs(start - cel);
-            const zrobiono = Math.abs(start - ostatniaFaktycznaWaga);
+
+            // Jeśli celem jest schudnięcie, dodatni postęp to start - aktualna.
+            // Jeśli ktoś przytył (aktualna > start), zrobiono będzie ujemne.
+            const zrobiono = redukcja ? (start - ostatniaFaktycznaWaga) : (ostatniaFaktycznaWaga - start);
             
             let procent = doPrzejsciaRazem > 0 ? Math.round((zrobiono / doPrzejsciaRazem) * 100) : 100;
             if (procent > 100) procent = 100;
-            if (procent < 0) procent = 0;
 
             const roznicaKg = Math.abs(ostatniaFaktycznaWaga - cel).toFixed(1);
             const kierunek = cel < ostatniaFaktycznaWaga ? 'do zrzucenia' : 'do przybrania';
 
+            // Ustawienia wizualne dla ujemnego postępu
+            const czyUjemny = procent < 0;
+            const barWidth = czyUjemny ? 0 : procent;
+            const classProcent = czyUjemny ? 'text-negative' : '';
+            
+            // Informacja o ile odbiegł od wagi początkowej (np. przytył 2 kg)
+            const deltaStart = Math.abs(ostatniaFaktycznaWaga - start).toFixed(1);
+            const zmianaStatus = redukcja ? `przytyło się +${deltaStart} kg` : `schudło się -${deltaStart} kg`;
+
             podsumowanieHtml.push(`
-              <div class="user-card" style="border-left-color: ${palette.main}">
+              <div class="user-card" style="border-left-color: ${czyUjemny ? '#dc2626' : palette.main}">
                 <div class="user-card-header">${email}</div>
                 <div class="metrics-row">
                   <span>Ostatni pomiar: <strong>${ostatniaFaktycznaWaga.toFixed(1)} kg</strong></span>
@@ -320,10 +336,12 @@
                 </div>
                 <div class="metrics-row">
                   <span>Pozostało: <strong>${roznicaKg} kg</strong> (${kierunek})</span>
-                  <span>Osiągnięto: <strong>${procent}%</strong></span>
+                  <span class="${classProcent}">
+                    Postęp: <strong>${procent}%</strong> ${czyUjemny ? `(${zmianaStatus})` : ''}
+                  </span>
                 </div>
                 <div class="progress-bar-bg">
-                  <div class="progress-bar-fill" style="width: ${procent}%; background-color: ${palette.main}"></div>
+                  <div class="progress-bar-fill" style="width: ${barWidth}%; background-color: ${czyUjemny ? '#dc2626' : palette.main}"></div>
                 </div>
               </div>
             `);
